@@ -1,0 +1,55 @@
+
+import librosa
+import numpy as np
+import sounddevice as sd
+import torch
+import torch.nn as nn
+
+input_size = 512 # Add the input size
+hidden_size = 128 # Add the hidden size
+num_layers = 2 # Add the number of layers
+num_classes = 10 # Add the number of classes
+model_path = 'model.pt' # Add the path to the trained RNN model
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+class RNN(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_classes):
+        super(RNN, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, num_classes)
+        
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
+        out, _ = self.lstm(x, (h0, c0))
+        out = self.fc(out[:, -1, :])
+        return out
+
+# Load the trained RNN model
+model = RNN(input_size, hidden_size, num_layers, num_classes).to(device)
+model.load_state_dict(torch.load(model_path))
+model.eval()
+
+def record_piano_input():
+    fs = 44100  # Sample rate
+    duration = 5  # Recording duration in seconds
+    recording = sd.rec(int(fs * duration), samplerate=fs, channels=1)
+    sd.wait()
+    return recording
+
+def analyze_audio_signal(recording, fs):
+    piano_input = librosa.core.stft(recording, n_fft=2048, hop_length=1024)
+    piano_pitch = librosa.core.pitch_tuning(piano_input)
+    piano_rhythm = librosa.beat.tempo(recording, sr=fs)
+    return piano_input, piano_pitch, piano_rhythm
+
+def generate_beat(piano_input):
+    beat = model(torch.tensor(piano_input, dtype=torch.float).unsqueeze(0).to(device))
+    return beat
+
+def play_beat(beat):
+    beat = np.array(beat.detach().cpu().numpy()[0], dtype=np.float32)
+    sd.play(beat)
+    sd
